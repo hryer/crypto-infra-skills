@@ -1,0 +1,20 @@
+{
+  "name": "crypto-infra-skills",
+  "description": "Production-grade engineering skills for AI coding agents — covering the full software development lifecycle from spec to ship.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Harry Ermawan"
+  },
+  "homepage": "https://github.com/hryer/crypto-infra-skills",
+  "repository": "https://github.com/hryer/crypto-infra-skills",
+  "license": "MIT",
+  "commands": "./.claude/commands",
+  "skills": "./skills",
+  "agents": [
+    "./agents/code-reviewer.md",
+    "./agents/security-auditor.md",
+    "./agents/test-engineer.md",
+    "./agents/web3-backend-reviewer.md",
+    "./agents/wallet-security-auditor.md"
+  ]
+}
