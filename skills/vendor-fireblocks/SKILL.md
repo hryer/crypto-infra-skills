@@ -72,9 +72,51 @@ Fireblocks pushes webhooks for tx status changes (`TRANSACTION_CREATED`, `TRANSA
 
 ## MCP integration
 
-Fireblocks publishes an MCP server. Wire it into the agent for live API access during reviews.
+Fireblocks publishes an MCP server (`@fireblocks/mcp-server`) that exposes the API as agent tools. **The skill stands alone — you only need this if you want the agent to query a live workspace** (e.g. "check my vault balances", "what's the active policy", "show me recent transactions").
 
-<!-- TODO: install + configure Fireblocks MCP server; document the available tools and how the agent should invoke them -->
+### Setup
+
+The user supplies credentials and the agent gets the tools automatically — no code changes. Register the server in the MCP client config (Claude Desktop / Cursor / `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "fireblocks": {
+      "command": "npx",
+      "args": ["@fireblocks/mcp-server"],
+      "env": {
+        "FIREBLOCKS_API_KEY": "<api-key>",
+        "FIREBLOCKS_PRIVATE_KEY_PATH": "/abs/path/to/fireblocks_secret.key",
+        "ENABLE_WRITE_OPERATIONS": "false",
+        "FIREBLOCKS_API_BASE_URL": "https://api.fireblocks.io/v1"
+      }
+    }
+  }
+}
+```
+
+- Node 18+, stdio transport.
+- `FIREBLOCKS_PRIVATE_KEY_PATH` is a **path to the RSA secret file**, not the key contents — keep it `chmod 600` and never inline the key into the config JSON.
+- For sandbox, point `FIREBLOCKS_API_BASE_URL` at the sandbox host and use a separate sandbox API user (vault IDs differ per workspace — see Common integration mistakes).
+
+### Safety posture (read-only by default)
+
+- **Keep `ENABLE_WRITE_OPERATIONS=false`** and use a **Viewer-role** API user. With writes off, only the read tools below are exposed — safe for "check my vault" / review workflows.
+- The only write tool is `create_transaction`, gated behind that flag. **Do not enable it for agent use.** An agent that can move funds on a custody platform is a foot-gun; create transactions through the SDK with the policy engine and human approval instead. See [[category-wallet-custody]] safety guidance.
+
+### Tools
+
+Read tools (available with `ENABLE_WRITE_OPERATIONS=false`):
+
+| When the user wants to… | Tool(s) |
+|---|---|
+| Check vault balances / holdings | `get_vault_accounts`, `get_vault_account_by_id`, `get_vault_account_asset`, `get_vault_balance_by_asset`, `get_vault_assets` |
+| Inspect transactions | `get_transactions` (filter by status / date / source / destination) |
+| Review governance | `get_active_policy`, `get_whitelist_ip_addresses`, `get_users` |
+| List wallets & venues | `get_external_wallets`, `get_internal_wallets`, `get_exchange_accounts`, `get_network_connections` |
+| Look up chain / asset metadata | `get_blockchains`, `get_blockchain_asset`, `get_assets` |
+
+Write tool (exposed only when `ENABLE_WRITE_OPERATIONS=true`; avoid for agent flows): `create_transaction`.
 
 ## Latest docs reference
 
@@ -82,8 +124,8 @@ Fireblocks publishes an MCP server. Wire it into the agent for live API access d
 - Webhook reference: https://developers.fireblocks.com/reference/webhooks-overview
 - TypeScript SDK: https://github.com/fireblocks/ts-sdk
 - Go SDK: https://github.com/fireblocks/fireblocks-sdk-go
-- MCP server: https://github.com/fireblocks/fireblocks-mcp *(verify URL)*
-- Last-verified: `<YYYY-MM-DD>` <!-- TODO: bump on each re-check -->
+- MCP server: https://github.com/fireblocks/fireblocks-mcp — npm `@fireblocks/mcp-server`
+- Last-verified: `2026-05-29` <!-- TODO: bump on each re-check -->
 
 ## When NOT to use this vendor
 
