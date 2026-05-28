@@ -161,6 +161,84 @@ jobs:
           path: playwright-report/
 ```
 
+### Go + Foundry CI Pipeline
+
+For a Go backend and/or Solidity contracts, the quality gate mirrors the Node one but with Go and Foundry toolchains. The Go authoring standards these gates enforce live in [[incremental-implementation]].
+
+```yaml
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - run: go build ./...
+      - run: go vet ./...
+      - name: gofmt (fail on diff)
+        run: test -z "$(gofmt -l .)"
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+      - name: Test with race detector
+        run: go test ./... -race -count=1
+
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Cache Foundry
+        uses: actions/cache@v4
+        with:
+          path: ~/.foundry
+          key: foundry-${{ hashFiles('**/foundry.toml') }}
+      - run: forge fmt --check
+      - run: forge build --sizes
+      - name: Test (fork)
+        run: forge test --fork-url ${{ secrets.MAINNET_RPC }} -vvv
+        # Pin the fork block in foundry.toml for reproducibility; budget fork-RPC
+        # quota — fork tests hammer the provider. See [[category-smart-contract-testing]].
+```
+
+### Rust + Anchor CI Pipeline
+
+For a Rust backend (matching engine, indexer, revm simulation) and/or Solana programs. Rust authoring standards these gates enforce live in [[incremental-implementation]].
+
+```yaml
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo build --all-targets
+      - run: cargo test --all-features
+      - name: Supply-chain audit
+        run: cargo audit   # or: cargo deny check
+
+  solana-programs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Solana + Anchor
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          cargo install --git https://github.com/coral-xyz/anchor avm --locked && avm install latest && avm use latest
+      - run: anchor build
+      - run: anchor test   # spins a local validator
+```
+
+**Monorepo note:** when a Go service, a Rust service, a Solana program, and a TS frontend share one repo, run them as a job matrix keyed by workspace (or use path filters so a frontend-only PR doesn't trigger the Rust + Anchor jobs). Keep `go test -race`, `cargo test`, `anchor test`, `forge test`, and `npm test` as separate required checks so a failure points at the right stack.
+
 ## Feeding CI Failures Back to Agents
 
 The power of CI with AI agents is the feedback loop. When CI fails:

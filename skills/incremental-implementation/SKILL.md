@@ -180,6 +180,60 @@ Each increment should be independently revertable:
 - Database migrations should have corresponding rollback migrations
 - Avoid deleting something in one commit and replacing it in the same commit — separate them
 
+## Language & Domain Best Practices (Go / TypeScript / Web3)
+
+This is the **canonical home** for how to write code well in this stack. Other skills (`test-driven-development`, `shipping-and-launch`, `code-simplification`, `ci-cd-and-automation`) reference this section rather than repeating it. Write to these standards as you implement each slice — they're not a post-hoc review step.
+
+### Golang authoring
+
+Conform to [Effective Go](https://go.dev/doc/effective_go). The non-negotiables:
+
+- **Context first.** Every blocking call (RPC, DB, vendor API) takes `ctx context.Context` as its first parameter, and cancellation propagates. No `context.Background()` deep inside business logic.
+- **Wrap errors, never swallow.** `fmt.Errorf("createTx: %w", err)` preserves the chain. A bare `return err` loses the call site; `_ = err` is a red flag.
+- **Goroutine lifetimes are owned.** Every `go func()` has a clear completion signal (WaitGroup, errgroup, or context cancellation). A goroutine with no exit path is a leak.
+- **`defer` for cleanup** (close, unlock, cancel) — co-located with acquisition.
+- **Small, consumer-side interfaces.** Define the interface where it's consumed, not where it's implemented. Accept interfaces, return concrete structs.
+- **Hot-path allocation awareness.** In matching-engine / order-router code, profile with `pprof`; avoid per-request allocations and reflection. See [[category-matching-engine]].
+- **No naked `string` for money or secrets.** Use decimal/fixed-point for amounts; `[]byte` (zeroable) for key material.
+
+### TypeScript authoring
+
+Align to **Effective TypeScript** (Dan Vanderkam). The high-leverage items:
+
+- **`strict: true`**, no implicit `any`. An `any` on a signing/money path is a bug waiting to happen.
+- **Narrow, don't assert.** Prefer type guards over `as` casts; reserve assertions for genuine escape hatches.
+- **Model state with discriminated unions** (`{ status: 'pending' } | { status: 'confirmed', txHash: Hex }`) so impossible states are unrepresentable.
+- **Branded types** for IDs and addresses (`type Address = string & { __brand: 'Address' }`) to stop mixing a `userId` with a `walletAddress`.
+- **Typed domain errors.** Don't throw raw `Error` across module boundaries; map vendor errors to your domain at the boundary.
+- **Propagate `AbortSignal`** through async call chains; no orphan promises (`void` or `.catch()` every fire-and-forget).
+- **Structured logging** (pino) — never `console.log` in production code, and never log secrets/addresses/PII.
+- **EVM clients:** prefer [viem](https://viem.sh) (typed ABIs catch encoding mistakes at compile time); treat web3.js / ethers as legacy.
+
+### Rust authoring
+
+Align to [The Rust Book](https://doc.rust-lang.org/book/) and the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/). Common in this stack for Solana programs (Anchor), high-performance matching engines, and node/simulation tooling (reth, revm). The non-negotiables:
+
+- **`Result<T, E>` + `?`, not panics.** `unwrap()` / `expect()` / `panic!` belong in tests and truly-unreachable branches only — never on a request or signing path. In Solana programs a panic aborts the transaction, but silent `unwrap` on untrusted input is still a bug.
+- **Errors:** `thiserror` for library/typed errors, `anyhow` for application boundaries. Preserve context with `.context("...")`.
+- **Don't fight the borrow checker with `.clone()`.** Pass `&T` / `&str` / `&[T]`; clone deliberately, not to silence an error. Excessive `.clone()` on a hot path is a review flag (see [[category-matching-engine]]).
+- **Model with the type system.** Newtype pattern for IDs/addresses (`struct Address(String);`) — the Rust analogue of TS branded types and Go defined types; stops mixing a `UserId` with a `WalletAddress`. `Option<T>` over nullable; exhaustive `match`.
+- **Async:** `tokio` runtime; never block (`std::fs`, blocking locks) inside `async`; mind `Send + Sync` bounds; cancel-safety on `select!`. Propagate cancellation like Go's context.
+- **Money:** `rust_decimal` (or integer base units), never `f64`.
+- **Checked math on-chain:** in Solana programs use `checked_add` / `checked_mul` (or `overflow-checks = true`); silent overflow = lost or minted funds.
+- **Clippy is the baseline.** `cargo clippy -- -D warnings` clean; `cargo fmt` clean.
+
+### Web3: build it right the first time
+
+These cost almost nothing if designed in, and are painful to retrofit. The reviewer ([[web3-backend-reviewer]]) checks for them after the fact — bake them in now so they share one definition of "good":
+
+- **Decimal / fixed-point for money and amounts** — never `float64` / JS `number`. (§1)
+- **Normalize addresses at the write boundary** — EIP-55 or consistent lowercase for EVM, base58 for Solana — so DB lookups don't miss on case. (§8)
+- **Idempotency keys from v1** — every external-input handler (webhook, consumer) dedupes on a stable key. Retrofitting this after a double-spend incident is the hard way. (§1, §13)
+- **Never log secrets** — keys, mnemonics, full vendor payloads, signing requests. (§6)
+- **Reorg-aware reads** — don't treat 1 confirmation as final; thresholds per chain. (§1)
+
+See [[web3-backend-reviewer]] (§1 correctness, §6 key management, §11 language idioms, §13 distributed systems) and [[wallet-security-auditor]] for the full review lens.
+
 ## Working with Agents
 
 When directing an agent to implement incrementally:
@@ -198,13 +252,12 @@ Be explicit about what's in scope and what's NOT in scope for each increment.
 
 ## Increment Checklist
 
-After each increment, verify:
+After each increment, verify. Run the toolchain that matches the package you touched — don't run `npm` checks on a Go change or vice versa:
 
 - [ ] The change does one thing and does it completely
-- [ ] All existing tests still pass (`npm test`)
-- [ ] The build succeeds (`npm run build`)
-- [ ] Type checking passes (`npx tsc --noEmit`)
-- [ ] Linting passes (`npm run lint`)
+- [ ] All existing tests still pass — TS: `npm test` · Go: `go test ./...` · Rust: `cargo test` (or `cargo nextest run`)
+- [ ] The build succeeds — TS: `npm run build` · Go: `go build ./...` · Rust: `cargo build`
+- [ ] Static checks pass — TS: `npx tsc --noEmit` + `npm run lint` · Go: `go vet ./...` + `golangci-lint run` + `gofmt -l` (clean) · Rust: `cargo clippy -- -D warnings` + `cargo fmt --check`
 - [ ] The new functionality works as expected
 - [ ] The change is committed with a descriptive message
 

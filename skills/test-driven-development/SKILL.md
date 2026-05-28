@@ -284,6 +284,55 @@ describe('TaskService', () => {
 });
 ```
 
+## Go / TypeScript / Web3 Testing
+
+This is the **canonical home** for testing idioms in this stack. For the language *authoring* idioms these tests exercise, see [[incremental-implementation]].
+
+### Golang testing
+
+- **Table-driven tests** with `t.Run` subtests — one test function, a slice of cases, a subtest per case. The Go-idiomatic default (aligns with [Effective Go](https://go.dev/doc/effective_go)).
+  ```go
+  func TestNormalizeAddress(t *testing.T) {
+      cases := []struct{ name, in, want string }{
+          {"lowercases", "0xAbC...", "0xabc..."},
+          {"rejects empty", "", ""},
+      }
+      for _, c := range cases {
+          t.Run(c.name, func(t *testing.T) {
+              if got := NormalizeAddress(c.in); got != c.want {
+                  t.Errorf("got %q want %q", got, c.want)
+              }
+          })
+      }
+  }
+  ```
+- **`t.Parallel()`** for independent cases; keep shared state out so parallelism stays safe.
+- **Fuzzing** (`func FuzzParse(f *testing.F)`) for parsers, encoders, address/amount handling — finds edge cases table tests miss.
+- **`testify` sparingly** — `require`/`assert` are fine, but don't let them hide what's being asserted.
+- **`testcontainers-go`** for real Postgres / Redis / Kafka in integration tests — this is the "Prefer Real Implementations Over Mocks" principle applied to Go. Spin up the real dependency, not a hand-rolled fake.
+
+### TypeScript testing
+
+- **Vitest** (or Jest) with typed fixtures; factory functions over shared mutable fixtures.
+- **`vi.mock` only at true boundaries** (network, clock, vendor SDK) — never mock your own domain logic.
+- Use the same RED → GREEN → REFACTOR cycle above; type-level errors are caught by `tsc`, behavior by the test.
+
+### Rust testing
+
+- **`#[cfg(test)] mod tests`** with `#[test]` fns; integration tests in `tests/`. Run via `cargo test` or `cargo nextest run` (faster, better output).
+- **Property-based testing** with `proptest` or `quickcheck` — the Rust analogue of Go fuzzing; ideal for parsers, encoders, amount/address handling. Rust also has built-in `cargo fuzz` (libFuzzer).
+- **`#[should_panic(expected = "...")]`** for asserting failure paths; prefer `Result`-returning tests (`-> anyhow::Result<()>`) so `?` works in tests.
+- **Real deps over mocks** (the principle above): `testcontainers` has a Rust crate for real Postgres/Redis/Kafka.
+- **Solana programs:** `litesvm` (fast, in-process) or `solana-program-test` for unit/integration; Anchor's `anchor test` spins a local validator for end-to-end. Test account-validation and checked-math failure paths explicitly. See [[category-smart-contract-testing]].
+
+### Web3 testing
+
+- **Fork tests** — `forge test --fork-url $RPC` (Foundry) or a local `anvil` fork pinned to a block. Run integration logic against real mainnet contract state. Pin the block so tests are reproducible. For Rust-based simulation, `revm` against forked state. See [[category-smart-contract-testing]].
+- **Pre-broadcast simulation** — assert a tx will succeed via [[vendor-tenderly]] before your code broadcasts it; test the reject path (revert reason surfaced) too.
+- **Reorg handling** — re-deliver a previously-seen (reorged) event and assert the system is idempotent: no double-credit, no duplicate ledger entry. This is the test most Web3 backends skip and most need.
+- **Vendor webhook idempotency** — replay the same signed webhook twice; assert exactly one effect. Also assert a bad signature is rejected.
+- **Solana** — `solana-test-validator` + Anchor's test harness for program-level tests.
+
 ## Test Anti-Patterns to Avoid
 
 | Anti-Pattern | Problem | Fix |
@@ -345,6 +394,11 @@ This separation ensures the test is written without knowledge of the fix, making
 ## See Also
 
 For detailed testing patterns, examples, and anti-patterns across frameworks, see `references/testing-patterns.md`.
+
+- [[incremental-implementation]] — the language authoring idioms these tests exercise (canonical Go/TS home)
+- [[category-smart-contract-testing]] — fork tests, Foundry/Hardhat, virtual TestNets
+- [[vendor-tenderly]] — simulation API + alerts for pre-broadcast and production debugging
+- [[web3-backend-reviewer]] — the review lens (§1 reorg/idempotency, §13 distributed systems) these Web3 tests defend
 
 ## Common Rationalizations
 

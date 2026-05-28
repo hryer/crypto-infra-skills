@@ -188,6 +188,8 @@ If the "simplified" version is harder to understand or review, revert. Not every
 
 ### TypeScript / JavaScript
 
+Align simplifications to **Effective TypeScript** (Dan Vanderkam): prefer narrowing over assertions, let inference do the work, and keep types precise. The examples below are the common mechanical wins; for the full TS authoring idiom list see [[incremental-implementation]].
+
 ```typescript
 // SIMPLIFY: Unnecessary async wrapper
 // Before
@@ -234,6 +236,111 @@ function isValid(input: string): boolean {
   return input.length > 0 && input.length < 100;
 }
 ```
+
+### Go
+
+Simplify toward [Effective Go](https://go.dev/doc/effective_go). These are the recurring mechanical wins; for the full Go authoring idiom list see [[incremental-implementation]].
+
+```go
+// SIMPLIFY: Nested conditionals → early returns (guard clauses)
+// Before
+func process(d *Data) error {
+    if d != nil {
+        if d.Valid() {
+            return doWork(d)
+        }
+        return errors.New("invalid")
+    }
+    return errors.New("nil data")
+}
+// After
+func process(d *Data) error {
+    if d == nil {
+        return errors.New("nil data")
+    }
+    if !d.Valid() {
+        return errors.New("invalid")
+    }
+    return doWork(d)
+}
+
+// SIMPLIFY: Pointless error variable
+// Before
+err := doThing()
+if err != nil {
+    return err
+}
+return nil
+// After
+return doThing()
+
+// SIMPLIFY: Single-implementation interface (YAGNI)
+// Before: an interface with exactly one implementer and one caller
+type Storer interface { Save(x X) error }
+type pgStore struct{}
+func (s pgStore) Save(x X) error { /* ... */ }
+// After: use the concrete type until a second implementation actually exists.
+// Define interfaces at the consumer when you need them, not preemptively.
+
+// SIMPLIFY: Index loop where range suffices
+// Before
+for i := 0; i < len(items); i++ {
+    process(items[i])
+}
+// After
+for _, item := range items {
+    process(item)
+}
+```
+
+Note: when collapsing `if err != nil { return err }`, keep the wrap (`fmt.Errorf("...: %w", err)`) if it adds call-site context — only remove the ladder when it's a pure pass-through.
+
+### Rust
+
+Simplify toward [The Rust Book](https://doc.rust-lang.org/book/) and the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/). Common mechanical wins; for the full Rust authoring idiom list see [[incremental-implementation]].
+
+```rust
+// SIMPLIFY: match on Result → ? operator
+// Before
+let user = match find_user(id) {
+    Ok(u) => u,
+    Err(e) => return Err(e),
+};
+// After
+let user = find_user(id)?;
+
+// SIMPLIFY: verbose match → if let / let else
+// Before
+let name = match maybe_name {
+    Some(n) => n,
+    None => return Err(Error::Missing),
+};
+// After
+let Some(name) = maybe_name else {
+    return Err(Error::Missing);
+};
+
+// SIMPLIFY: manual loop → iterator chain
+// Before
+let mut active = Vec::new();
+for u in users {
+    if u.is_active {
+        active.push(u);
+    }
+}
+// After
+let active: Vec<_> = users.into_iter().filter(|u| u.is_active).collect();
+
+// SIMPLIFY: needless clone to satisfy the borrow checker
+// Before
+fn greet(name: String) { println!("hi {name}"); }
+greet(user.name.clone());
+// After: borrow instead of clone
+fn greet(name: &str) { println!("hi {name}"); }
+greet(&user.name);
+```
+
+Note: don't remove a `.clone()` if the value is genuinely needed in two owners — only when a borrow (`&T`) would compile. And keep `?`-friendly error types (`thiserror`/`anyhow`) rather than flattening to `unwrap()`.
 
 ### Python
 

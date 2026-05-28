@@ -58,14 +58,19 @@ Approach every review with these dimensions:
 
 ### 7. Vendor integrations
 - **Custody classification**: is this wallet integration custodial, non-custodial, or MPC/hybrid? Is the classification documented and matched to product / legal / compliance requirements?
-- **Vendor identification**: which vendor is in use — Fireblocks, Dynamic, Privy, Fordefi, Turnkey, BitGo, Magic, Web3Auth, QuickNode? (Cross-reference the [[waas-vendor-selection]] skill for whether the vendor fits the product's custody and chain requirements.)
-- **Documentation currency**: when a vendor is identified, invoke that vendor's dedicated skill to pull **latest** docs / best practices / (where available) MCP integration. Skill mapping *(skills pending — user will add)*:
-  - Fireblocks → [[fireblocks]] *(MOCK — pending; will include Fireblocks MCP integration)*
-  - Privy → [[privy]] *(MOCK — pending)*
-  - Fordefi → [[fordefi]] *(MOCK — pending)*
-  - QuickNode → [[quicknode]] *(MOCK — pending)*
-  - Tenderly → [[tenderly]] *(MOCK — pending; primarily used in §10 Debugging)*
-  - Until these skills exist, the reviewer should manually verify the implementation against the vendor's official documentation URL and note the doc version / date checked.
+- **Vendor identification**: which vendor is in use — Fireblocks, Dynamic, Privy, Fordefi, Turnkey, BitGo, Magic, Web3Auth, QuickNode? (Cross-reference the [[category-wallet-custody]] skill for whether the vendor fits the product's custody and chain requirements.)
+- **Documentation currency**: when a vendor is identified, invoke that vendor's dedicated skill to pull **latest** docs / best practices / (where available) MCP integration. Skill mapping:
+  - Fireblocks → [[vendor-fireblocks]] (includes Fireblocks MCP integration)
+  - Privy → [[vendor-privy]]
+  - Fordefi → [[vendor-fordefi]]
+  - Dynamic → [[vendor-dynamic]]
+  - Turnkey → [[vendor-turnkey]]
+  - Alchemy → [[vendor-alchemy]]
+  - QuickNode → [[vendor-quicknode]]
+  - Helius → [[vendor-helius]]
+  - Tenderly → [[vendor-tenderly]] (primarily used in §10 Debugging)
+  - Chainlink → [[vendor-chainlink]]
+  - Each vendor skill records the official docs URL and last-verified date — bump the date whenever the integration is re-checked against current docs.
 - Verify the implementation matches current best practices: auth flow, webhook signature verification, idempotency guarantees, supported chains, rate limits, SDK version currency.
 - **Smart contract / program addresses**: if the product touches dApps, DeFi, or on-chain protocols, are the smart contract addresses (EVM) or program IDs (Solana) pinned in config, verified against a registry (Etherscan-verified source, audited), and gated against silent upgrades (proxy admin keys, upgradeability mechanism understood and monitored)?
 
@@ -79,7 +84,7 @@ Approach every review with these dimensions:
 ### 9. Error handling & fallbacks
 - When a vendor webhook/callback fails to deliver (timeout, signature mismatch, vendor outage, dropped delivery), what happens? Is there a reconciliation job that pulls state via REST/polling as a backstop?
 - Is there a queue (pub/sub, SQS, NATS, Kafka) buffering inbound webhook events so a downstream DB outage doesn't drop them?
-- Is there a **fallback vendor** path for critical operations (e.g., if Alchemy RPC is down, do we fail over to [[quicknode]] *(MOCK — pending)* / Infura / a self-hosted node)?
+- Is there a **fallback vendor** path for critical operations (e.g., if Alchemy RPC is down, do we fail over to [[vendor-quicknode]] / Infura / a self-hosted node)?
 - Is there a **self-hosted indexer fallback** when the third-party indexer (Alchemy, Helius, Goldsky) lags or errors?
 - Are fallbacks actually tested via chaos drills / failover rehearsals — or only documented and never exercised?
 
@@ -89,7 +94,66 @@ Approach every review with these dimensions:
   - **Smart contract layer** (revert reason, out-of-gas, ABI mismatch, contract paused, allowance missing)
   - **Blockchain layer** (RPC error, reorg, chain congestion, hardfork, mempool eviction)?
 - Are errors tagged / structured-logged with their layer attribution so triage is minutes, not hours?
-- For on-chain failures, is Tenderly (or equivalent: Phalcon, Foundry/Forge trace, Solana Explorer) integrated into the debugging runbook so reverts can be simulated and root-caused? Invoke the [[tenderly]] skill *(MOCK — pending; user will add)* for current Tenderly usage patterns (simulation API, virtual TestNets, alert rules).
+- For on-chain failures, is Tenderly (or equivalent: Phalcon, Foundry/Forge trace, Solana Explorer) integrated into the debugging runbook so reverts can be simulated and root-caused? Invoke the [[vendor-tenderly]] skill for current Tenderly usage patterns (simulation API, virtual TestNets, alert rules). For local fork tests and unit tests, see [[category-smart-contract-testing]].
+
+### 11. Language idioms (TypeScript + Golang + Rust)
+
+Most backends in this stack are TS, Go, or Rust. Each has idiom expectations.
+
+**TypeScript:**
+- Strict mode enabled (`strict: true` in tsconfig); no implicit `any`.
+- Error wrapping with typed domain errors; do not throw raw `Error` across module boundaries.
+- Structured logging (e.g., `pino`) — never `console.log` in production code.
+- Async patterns: `AbortSignal` propagation; no orphan promises (`void` or `.catch()` every fire-and-forget).
+- For EVM clients: prefer [viem](https://viem.sh); treat `web3.js` / `ethers.js` as legacy and flag during review.
+
+**Golang:**
+- Code must conform to [Effective Go](https://go.dev/doc/effective_go). Flag deviations: naming (`getX` → `X`), error returns last, `defer` discipline, goroutine lifetimes tied to a `context.Context`, interface placement (consumer-side not producer-side).
+- Every blocking call takes `ctx context.Context` as first parameter; cancellation propagates.
+- Error wrapping with `fmt.Errorf("operation: %w", err)`; never lose error chain.
+- No swallowed errors; no goroutine leaks (every `go func()` has a clear lifetime + completion signal).
+- Hot path allocations: profile with `pprof` and `benchstat`; avoid per-request allocations in matching engine / order-router code (see [[category-matching-engine]]).
+
+**Rust** (Solana programs, matching engines, reth/revm tooling):
+- Conform to [The Rust Book](https://doc.rust-lang.org/book/) + [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/). Flag `unwrap()` / `expect()` / `panic!` on request or signing paths (tests + truly-unreachable only).
+- `Result<T, E>` + `?` everywhere; `thiserror` for typed errors, `anyhow` at app boundaries; preserve context.
+- Borrow over clone — flag `.clone()` used to silence the borrow checker, especially on hot paths.
+- Async: `tokio`; no blocking calls inside `async`; cancel-safety on `select!`; `Send + Sync` bounds correct.
+- Newtype pattern for IDs/addresses; exhaustive `match`; `Option` over nullable.
+- **On-chain (Solana):** checked math (`checked_add`/`checked_mul` or `overflow-checks = true`) — silent overflow mints/loses funds; account validation via Anchor constraints (`#[account(...)]`); PDA seeds verified; CPI targets trusted. Deep program-security review → [[wallet-security-auditor]].
+- `cargo clippy -- -D warnings` and `cargo fmt` clean.
+
+### 12. Infrastructure correctness
+
+Wallet / indexer / matching-engine backends depend on a small set of infra primitives. Check each that's in use.
+
+- **AWS SQS / SNS / GCP Pub/Sub / Kafka** (webhook buffering, event fan-out):
+  - FIFO when order matters (per-user, per-symbol); standard otherwise.
+  - DLQ wired for every consumer; alert on DLQ depth, not just rate.
+  - Idempotency at the consumer (vendor retries WILL deliver twice).
+- **Redis** (cache, distributed lock, rate limit, in-memory ledger):
+  - TTLs explicit, not implicit. Cache stampede protection (singleflight / lock).
+  - For distributed locks: be aware of Redlock pitfalls; for high-stakes locks use Postgres advisory locks instead.
+- **Postgres / MySQL** (transactional store, ledger):
+  - Isolation level explicit for ledger transactions (typically `SERIALIZABLE` for double-entry writes; see [[category-internal-ledger]]).
+  - No long-running transactions across HTTP request boundaries.
+  - Indexes on every column used in WHERE / JOIN / ORDER BY on hot tables.
+  - JSONB columns deliberately, not as a schema-shortcut.
+- **S3 / object storage** (settlement files, event archive):
+  - Lifecycle rules; versioning enabled for files you might need to recover.
+  - Signed URLs short-lived; never public buckets for user data.
+
+### 13. Distributed systems
+
+Crypto backends are distributed by default (vendor APIs, multiple chains, multiple services). Review for:
+
+- **Idempotency keys at every system boundary** — inbound webhooks, internal RPC, outbound submissions. Without a key, retries become double-actions.
+- **Exactly-once via outbox pattern** — when you must publish an event AND write to the DB, write the event to an outbox table in the same transaction; a publisher worker drains the outbox. Avoid two-phase commit; avoid "write to DB then publish" (publish can fail; event lost).
+- **Ordering guarantees** — Kafka per-partition order is per-key; SQS FIFO is per group ID; Pub/Sub ordering requires ordering keys. Verify the right key is chosen (often `user_id` or `wallet_id`).
+- **Fan-out / fan-in** — a webhook event may need to update 3 services; either use a topic + multiple consumers, or a sync orchestrator with retry. Don't chain HTTP calls between services for critical paths.
+- **Clock skew** — never compare timestamps from different machines for correctness logic; use logical clocks (Lamport / monotonic version numbers) or single-writer ordering.
+- **Backpressure** — when downstream is slow, do consumers pause or drop? Drop is rarely safe in financial backends.
+- **Circuit breakers** — vendor degraded → trip breaker → fail fast with clear error rather than hanging requests.
 
 ## Review format
 

@@ -66,6 +66,41 @@ Ship with confidence. The goal is not just to deploy — it's to deploy safely, 
 - [ ] Logging and error reporting configured
 - [ ] Health check endpoint exists and responds
 
+### Web3 / On-chain readiness
+
+For any crypto backend, these block launch. The review lens for each lives in [[web3-backend-reviewer]] — this is the pre-ship checklist version.
+
+- [ ] **RPC failover** configured — primary + fallback vendor, not a single endpoint (see [[category-rpc-and-indexer]]; e.g. [[vendor-alchemy]] ↔ [[vendor-quicknode]])
+- [ ] **Kill switch / pause** — can halt outbound signing or processing without restarting the process (§4)
+- [ ] **Reorg-safe confirmation thresholds** set per chain — no action finalized on 1 confirmation (§1)
+- [ ] **Vendor webhook reconciliation job** live — REST-poll backstop for missed webhooks (§9)
+- [ ] **Key rotation runbook** exists and has been dry-run (see [[wallet-security-auditor]]; secrets in KMS, never plaintext)
+- [ ] **Gas / fee + nonce monitoring** — alert on stuck txs, fee spikes, nonce gaps
+- [ ] **Contract / program addresses pinned + verified** against a registry, not hard-coded unverified strings (§7)
+- [ ] **Idempotency** verified on every external-input handler under retry / double-delivery (§1, §13)
+
+### Language-specific build
+
+**Go:**
+- [ ] Static binary where applicable (`CGO_ENABLED=0`), reproducible build
+- [ ] Graceful shutdown on `SIGTERM` via `context` cancellation (drain in-flight work, close DB/queue cleanly)
+- [ ] `pprof` endpoint exposed only on an internal port, never public
+- [ ] Version / commit stamped via `-ldflags "-X main.version=..."`
+- [ ] `go vet` + `golangci-lint` clean in CI (see [[ci-cd-and-automation]])
+
+**TypeScript:**
+- [ ] Production build excludes dev dependencies
+- [ ] Source maps generated and handled (uploaded to error reporter, not served publicly)
+- [ ] Structured logging on (pino), no `console.log`, no secrets/addresses in logs
+- [ ] `tsc --noEmit` + lint clean in CI
+
+**Rust:**
+- [ ] `cargo build --release` with a tuned release profile (`lto = true`, `codegen-units = 1`, `strip = true`; `panic = "abort"` only if no unwinding is relied on)
+- [ ] Graceful shutdown via `tokio::signal` (drain in-flight work, close DB/queue cleanly)
+- [ ] `cargo clippy -- -D warnings` + `cargo fmt --check` + `cargo audit` (or `cargo deny`) clean in CI
+- [ ] Panics don't leak across the API boundary (catch / convert at handlers; `unwrap` only where truly unreachable)
+- [ ] **Solana programs:** verifiable build (`anchor build` / `solana-verify`); program **upgrade authority** is a multisig/governance key, not a hot EOA (security-critical — see [[wallet-security-auditor]]); deploy + upgrade runbook documented
+
 ### Documentation
 
 - [ ] README updated with any new setup requirements
@@ -268,6 +303,11 @@ Every deployment needs a rollback plan before it happens:
 - For security pre-launch checks, see `references/security-checklist.md`
 - For performance pre-launch checklist, see `references/performance-checklist.md`
 - For accessibility verification before launch, see `references/accessibility-checklist.md`
+- [[web3-backend-reviewer]] — the review lens behind the Web3 readiness checklist (§4 operational maturity, §9 error handling / fallbacks)
+- [[wallet-security-auditor]] — key rotation, KMS, signing-path pre-launch review
+- [[category-wallet-custody]] — custody/operational runbooks (rotation, ceremony, incident response)
+- [[category-rpc-and-indexer]] — RPC failover + indexer fallback design
+- [[ci-cd-and-automation]] — the Go/TS/Foundry pipeline that enforces these gates pre-deploy
 
 ## Common Rationalizations
 
