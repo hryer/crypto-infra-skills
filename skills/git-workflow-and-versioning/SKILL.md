@@ -93,6 +93,12 @@ update auth.ts
 - `docs` — Documentation only
 - `chore` — Tooling, dependencies, config
 
+**Authorship — no AI co-authors.** Commits are attributed to the human author only. Do **not** add `Co-Authored-By:` trailers for AI assistants (Claude, Copilot, Cursor, etc.) or any tool, and never set an AI as the commit author or committer. Even when an AI agent generated the change, the commit is the author's work and must read that way in `git log` and on GitHub:
+
+- No `Co-Authored-By: Claude …` (or any AI/tool) line in the commit message.
+- No AI name or email as commit author or committer.
+- The human owns the change; tools are not co-authors.
+
 ### 4. Keep Concerns Separate
 
 Don't combine formatting changes with behavior changes. Don't combine refactors with features. Each type of change should be a separate commit — and ideally a separate PR:
@@ -287,6 +293,7 @@ git log --grep="validation" --oneline
 - Committing `node_modules/`, `.env`, or build artifacts
 - Long-lived branches that diverge significantly from main
 - Force-pushing to shared branches
+- AI co-author trailers (`Co-Authored-By: Claude`, Copilot, etc.) or an AI set as commit author/committer
 
 ## Verification
 
@@ -298,3 +305,4 @@ For every commit:
 - [ ] No secrets in the diff
 - [ ] No formatting-only changes mixed with behavior changes
 - [ ] `.gitignore` covers standard exclusions
+- [ ] No AI co-author trailer; commit is attributed solely to the human author
